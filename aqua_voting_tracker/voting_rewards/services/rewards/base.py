@@ -64,8 +64,10 @@ class RewardsCalculator:
             yield market_reward
 
     def filter_eligible(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
-        # Drop markets whose pair is not whitelisted for rewards. Runs after
-        # calculate_shares so dropped shares are not redistributed to survivors.
+        # Drop markets whose pair is not whitelisted for rewards. Runs before
+        # calculate_shares so the share denominator is restricted to survivors —
+        # when there are few enough survivors, each naturally lifts to the
+        # REWARD_MAX_SHARE cap via cap+redistribute.
         for market_reward in reward_zone:
             if not market_reward.whitelisted_for_rewards:
                 continue
@@ -95,8 +97,9 @@ class RewardsCalculator:
 
     def set_reward_value(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
         # No /total_share renormalization: per-pair cap stays absolute at
-        # REWARD_MAX_SHARE * TOTAL_REWARDS, and total dispersion across survivors
-        # can be < TOTAL_REWARDS when filter_eligible has dropped any markets.
+        # REWARD_MAX_SHARE * TOTAL_REWARDS, and total dispersion falls below
+        # TOTAL_REWARDS whenever cap+redistribute leaves any residue (e.g. with
+        # few enough survivors that everyone hits the cap).
         for market_reward in reward_zone:
             market_reward.reward_value = round(self.TOTAL_REWARDS * market_reward.share)
             market_reward.share = Decimal(round(market_reward.share, 4))

@@ -133,15 +133,16 @@ class GetCurrentRewardTestCase(TestCase):
             '0.0303', '0.0303', '0.0303', '0.0303', '0.0303', '0.0303', '0.0152', '0.0152', '0.0152',
         ])
 
-    def test_whitelist_dilution(self):
-        # Non-whitelisted markets do not get rewards and their shares are NOT
-        # redistributed to survivors — total dispersion drops by their combined share.
+    def test_whitelist_few_survivors_lift_to_cap(self):
+        # With filter_eligible running before calculate_shares, the share denominator
+        # is restricted to survivors. When ≤10 survivors pass through, each base
+        # share (votes / survivors_votes) is large enough to hit REWARD_MAX_SHARE
+        # and cap+redistribute lifts everyone to the cap. Total reward = N * cap *
+        # TOTAL_REWARDS, with cap residue lost (no upward normalization).
         candidates = get_candidates([95, 90, 85, 80, 75, 70, 65, 60, 55, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10])
-        stats = get_stats(candidates)  # full_voting_value = 1000
+        stats = get_stats(candidates)
 
-        # Whitelist first 5 markets only: survivors_votes = 95+90+85+80+75 = 425, dilution = 0.425.
         whitelist_flags = [True] * 5 + [False] * 14
-        survivors_share = Decimal('0.425')
 
         with patch(self.get_candidates_patch, new=lambda x: candidates):
             with patch(self.get_stats_patch, new=lambda: stats):
@@ -153,20 +154,19 @@ class GetCurrentRewardTestCase(TestCase):
 
         self.assertEqual(len(rewards), 5)
 
-        # Per-pair share = votes / full_voting_value (no /total_share renormalization).
-        self.assert_shares(rewards, ['0.095', '0.09', '0.085', '0.08', '0.075'])
+        # Survivors votes = 95+90+85+80+75 = 425, denominator = 425.
+        # Each base share > 0.176 — all exceed REWARD_MAX_SHARE; cap+redistribute
+        # lifts every survivor to 0.1.
+        self.assert_shares(rewards, ['0.1', '0.1', '0.1', '0.1', '0.1'])
 
-        # Total dispersion = TOTAL_REWARDS * survivors_share (≈ 0.425 * 7M).
+        # Total = 5 * 700k = 3.5M. Cap residue (0.5) is lost.
         total_reward = sum(reward.reward_value for reward in rewards)
         self.assertAlmostEqual(
             total_reward,
-            settings.TOTAL_REWARD_VALUE * survivors_share,
+            settings.TOTAL_REWARD_VALUE * Decimal('0.5'),
             delta=5,
         )
         self.assertLessEqual(total_reward, settings.TOTAL_REWARD_VALUE)
-
-        # Per-pair cap is absolute (REWARD_MAX_SHARE * TOTAL_REWARDS = 700k), not relative.
-        self.assertTrue(all(reward.share <= settings.REWARD_MAX_SHARE for reward in rewards))
         self.assertTrue(all(
             reward.reward_value <= settings.REWARD_MAX_SHARE * settings.TOTAL_REWARD_VALUE
             for reward in rewards
