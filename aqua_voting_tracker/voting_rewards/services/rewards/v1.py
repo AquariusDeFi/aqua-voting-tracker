@@ -27,6 +27,7 @@ class RewardsV1Calculator(RewardsCalculator):
         reward_zone = self.get_reward_zone()
         reward_zone = self.connect_assets(reward_zone)
         reward_zone = self.calculate_shares(reward_zone)
+        reward_zone = self.filter_eligible(reward_zone)
         reward_zone = self.set_reward_value(reward_zone)
         reward_zone = self.distribute_sdex_amm_rewards(reward_zone)
         return list(reward_zone)

@@ -15,6 +15,8 @@ class MarketReward:
     asset1: str = None
     asset2: str = None
 
+    whitelisted_for_rewards: bool = False
+
     share: Decimal = None
     reward_value: Decimal = None
 
@@ -49,15 +51,24 @@ class RewardsCalculator:
         reward_zone = list(reward_zone)
         market_pairs = get_market_pairs((market.market_key for market in reward_zone))
         market_pair_mapping = {
-            market_pair['account_id']: (market_pair['asset1'], market_pair['asset2'])
+            market_pair['account_id']: market_pair
             for market_pair in market_pairs
         }
 
         for market_reward in reward_zone:
-            asset1, asset2 = market_pair_mapping[market_reward.market_key]
-            market_reward.asset1 = asset1
-            market_reward.asset2 = asset2
+            market_pair = market_pair_mapping[market_reward.market_key]
+            market_reward.asset1 = market_pair['asset1']
+            market_reward.asset2 = market_pair['asset2']
+            market_reward.whitelisted_for_rewards = bool(market_pair.get('whitelisted_for_rewards'))
 
+            yield market_reward
+
+    def filter_eligible(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
+        # Drop markets whose pair is not whitelisted for rewards. Runs after
+        # calculate_shares so dropped shares are not redistributed to survivors.
+        for market_reward in reward_zone:
+            if not market_reward.whitelisted_for_rewards:
+                continue
             yield market_reward
 
     def calculate_shares(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
@@ -83,11 +94,11 @@ class RewardsCalculator:
             yield market_reward
 
     def set_reward_value(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
-        reward_zone = list(reward_zone)
-        total_share = sum(market.share for market in reward_zone)
-
+        # No /total_share renormalization: per-pair cap stays absolute at
+        # REWARD_MAX_SHARE * TOTAL_REWARDS, and total dispersion across survivors
+        # can be < TOTAL_REWARDS when filter_eligible has dropped any markets.
         for market_reward in reward_zone:
-            market_reward.reward_value = round(self.TOTAL_REWARDS * market_reward.share / total_share)
+            market_reward.reward_value = round(self.TOTAL_REWARDS * market_reward.share)
             market_reward.share = Decimal(round(market_reward.share, 4))
 
             yield market_reward
