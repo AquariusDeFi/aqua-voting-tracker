@@ -59,20 +59,14 @@ class GetCurrentRewardTestCase(TestCase):
 
     def assert_rewards(self, rewards: List[MarketReward]):
         total_reward = sum(reward.reward_value for reward in rewards)
+        # Cap-only, no redistribution: each market earns share * TOTAL_REWARDS
+        # against the FULL denominator, clamped at the cap. The dispersed total
+        # is <= TOTAL_REWARDS (short by the capped excess and any dropped share);
+        # it is no longer normalized back up to TOTAL_REWARDS.
         self.assertLessEqual(total_reward, settings.TOTAL_REWARD_VALUE)
-        self.assertAlmostEqual(
-            total_reward,
-            settings.TOTAL_REWARD_VALUE,
-            delta=5,
-        )
         self.assertTrue(all(reward.reward_value == reward.amm_reward_value + reward.sdex_reward_value
                             for reward in rewards))
 
-        self.assertAlmostEqual(
-            sum(float(reward.share) for reward in rewards),
-            1,
-            delta=0.0001,
-        )
         self.assertTrue(all(reward.share <= settings.REWARD_MAX_SHARE for reward in rewards))
 
         prev_reward = rewards[0]
@@ -106,6 +100,9 @@ class GetCurrentRewardTestCase(TestCase):
         ])
 
     def test_cut_to_limit1(self):
+        # denominator = sum = 400. Cap-only, no redistribution: markets over the
+        # cap clamp to 0.1 and the excess is dropped (not spread to the rest), so
+        # every below-cap market keeps its raw votes/400 share.
         candidates = get_candidates([50, 50, 50, 50, 30, 30, 20, 20, 10, 10, 10, 10, 10, 10, 10, 10, 5, 5, 5, 5])
         stats = get_stats(candidates)
 
@@ -115,11 +112,13 @@ class GetCurrentRewardTestCase(TestCase):
 
         self.assert_rewards(rewards)
         self.assert_shares(rewards, [
-            '0.1', '0.1', '0.1', '0.1', '0.09', '0.09', '0.06', '0.06', '0.03', '0.03', '0.03',
-            '0.03', '0.03', '0.03', '0.03', '0.03', '0.015', '0.015', '0.015', '0.015',
+            '0.1', '0.1', '0.1', '0.1', '0.075', '0.075', '0.05', '0.05', '0.025', '0.025', '0.025',
+            '0.025', '0.025', '0.025', '0.025', '0.025', '0.0125', '0.0125', '0.0125', '0.0125',
         ])
 
     def test_cut_to_limit2(self):
+        # denominator = sum = 400. Four markets clamp to the 0.1 cap; the rest keep
+        # their raw votes/400 share. No redistribution of the capped excess.
         candidates = get_candidates([50, 50, 50, 50, 35, 30, 20, 20, 10, 10, 10, 10, 10, 10, 10, 10, 5, 5, 5])
         stats = get_stats(candidates)
 
@@ -129,16 +128,16 @@ class GetCurrentRewardTestCase(TestCase):
 
         self.assert_rewards(rewards)
         self.assert_shares(rewards, [
-            '0.1', '0.1', '0.1', '0.1', '0.1', '0.0909', '0.0606', '0.0606', '0.0303', '0.0303',
-            '0.0303', '0.0303', '0.0303', '0.0303', '0.0303', '0.0303', '0.0152', '0.0152', '0.0152',
+            '0.1', '0.1', '0.1', '0.1', '0.0875', '0.075', '0.05', '0.05', '0.025', '0.025',
+            '0.025', '0.025', '0.025', '0.025', '0.025', '0.025', '0.0125', '0.0125', '0.0125',
         ])
 
-    def test_whitelist_few_survivors_lift_to_cap(self):
-        # With filter_eligible running before calculate_shares, the share denominator
-        # is restricted to survivors. When ≤10 survivors pass through, each base
-        # share (votes / survivors_votes) is large enough to hit REWARD_MAX_SHARE
-        # and cap+redistribute lifts everyone to the cap. Total reward = N * cap *
-        # TOTAL_REWARDS, with cap residue lost (no upward normalization).
+    def test_whitelist_survivors_keep_raw_share(self):
+        # Cap-only, no redistribution, FULL denominator. filter_eligible drops the
+        # non-whitelisted markets, but the dropped votes stay in the denominator
+        # (sum of all candidates = 1000), so survivors do NOT lift to the cap —
+        # each keeps its raw votes/1000 share. None of the five survivors reach
+        # 0.1, so total = 0.425 * TOTAL_REWARDS, well below TOTAL_REWARDS.
         candidates = get_candidates([95, 90, 85, 80, 75, 70, 65, 60, 55, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10])
         stats = get_stats(candidates)
 
@@ -152,33 +151,28 @@ class GetCurrentRewardTestCase(TestCase):
                 ):
                     rewards = RewardsV1Calculator().run()
 
+        self.assert_rewards(rewards)
         self.assertEqual(len(rewards), 5)
 
-        # Survivors votes = 95+90+85+80+75 = 425, denominator = 425.
-        # Each base share > 0.176 — all exceed REWARD_MAX_SHARE; cap+redistribute
-        # lifts every survivor to 0.1.
-        self.assert_shares(rewards, ['0.1', '0.1', '0.1', '0.1', '0.1'])
+        # Survivors votes = [95, 90, 85, 80, 75], full denominator = 1000.
+        # Raw shares stay below the cap; no lift, no redistribution.
+        self.assert_shares(rewards, ['0.095', '0.09', '0.085', '0.08', '0.075'])
 
-        # Total = 5 * 700k = 3.5M. Cap residue (0.5) is lost.
+        # Total = 0.425 * 7M = 2,975,000. The other 57.5% of votes are not emitted.
         total_reward = sum(reward.reward_value for reward in rewards)
         self.assertAlmostEqual(
             total_reward,
-            settings.TOTAL_REWARD_VALUE * Decimal('0.5'),
+            settings.TOTAL_REWARD_VALUE * Decimal('0.425'),
             delta=5,
         )
         self.assertLessEqual(total_reward, settings.TOTAL_REWARD_VALUE)
-        self.assertTrue(all(
-            reward.reward_value <= settings.REWARD_MAX_SHARE * settings.TOTAL_REWARD_VALUE
-            for reward in rewards
-        ))
 
-    def test_whitelist_cap_redistribute(self):
-        # filter_eligible runs AFTER calculate_shares: cap+redistribute is computed
-        # over the full reward_zone (including non-whitelisted), then non-whitelisted
-        # markets are dropped — their final share is removed entirely, not dissolved
-        # back into survivors. Per-pair cap is 700k absolute (REWARD_MAX_SHARE * TOTAL_REWARDS).
-        # Votes [600, 200, 50, 50, 50, 50], denominator = 1000.
-        # First (600 votes) not whitelisted.
+    def test_whitelist_cap_then_drop_no_redistribute(self):
+        # Cap-only, FULL denominator (= 1000). The dominant market is dropped as
+        # non-whitelisted; its share is simply not emitted and is NOT spread to
+        # survivors. The whitelisted 200-vote market clamps to the 0.1 cap; the
+        # four 50-vote markets keep raw 0.05. Excess above the cap is dropped.
+        # Votes [600, 200, 50, 50, 50, 50]; first (600) not whitelisted.
         candidates = get_candidates([600, 200, 50, 50, 50, 50])
         stats = get_stats(candidates)
 
@@ -192,22 +186,22 @@ class GetCurrentRewardTestCase(TestCase):
                 ):
                     rewards = RewardsV1Calculator().run()
 
+        self.assert_rewards(rewards)
         self.assertEqual(len(rewards), 5)
 
-        # All 6 markets hit the 0.1 cap during calculate_shares (m1 base=0.6, m2 base=0.2;
-        # cut_share accumulates and pushes m3..m6 over the cap too). After dropping
-        # m1, survivors each retain their cap of 0.1.
-        self.assert_shares(rewards, ['0.1', '0.1', '0.1', '0.1', '0.1'])
+        # m2 = 200/1000 = 0.2 -> clamp 0.1; m3..m6 = 50/1000 = 0.05 (unchanged).
+        self.assert_shares(rewards, ['0.1', '0.05', '0.05', '0.05', '0.05'])
 
-        # Total = 5 * 700k = 3.5M (= 0.5 * TOTAL_REWARDS); m1's 0.1 capped share is lost.
+        # Total = (0.1 + 4 * 0.05) * 7M = 0.3 * 7M = 2,100,000. m1's 0.6 (capped to
+        # 0.1) and m2's capped excess (0.1) are both dropped, not redistributed.
         total_reward = sum(reward.reward_value for reward in rewards)
         self.assertAlmostEqual(
             total_reward,
-            settings.TOTAL_REWARD_VALUE * Decimal('0.5'),
+            settings.TOTAL_REWARD_VALUE * Decimal('0.3'),
             delta=5,
         )
 
-        # Per-pair cap is 700k absolute.
+        # Per-pair reward never exceeds the 700k cap.
         self.assertTrue(all(
             reward.reward_value <= settings.REWARD_MAX_SHARE * settings.TOTAL_REWARD_VALUE
             for reward in rewards
