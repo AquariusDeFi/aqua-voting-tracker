@@ -49,14 +49,16 @@ class SnapshotRecordFactory(factory.Factory):
     downvote_value = factory.fuzzy.FuzzyDecimal(0)
 
     voting_amount = factory.fuzzy.FuzzyInteger(1)
-    votes_value = factory.LazyAttribute(lambda sr: sr.upvote_value - sr.download_value)
+    votes_value = factory.LazyAttribute(lambda sr: sr.upvote_value - sr.downvote_value)
 
-    upvote_assets = factory.LazyAttribute(lambda sr: [SnapshotAssetRecordFactory(votes_sum=sr.upvote_value,
-                                                                                 votes_count=sr.voting_amount)])
+    upvote_assets = factory.LazyAttribute(lambda sr: [SnapshotAssetRecordFactory(votes_sum=str(sr.upvote_value),
+                                                                                  votes_count=sr.voting_amount)])
     downvote_assets = factory.LazyAttribute(lambda sr: [])
 
     adjusted_votes_value = factory.LazyAttribute(lambda sr: sr.votes_value)
     rank = 1
+
+    whitelisted_for_rewards = False
 
     class Meta:
         model = SnapshotRecord

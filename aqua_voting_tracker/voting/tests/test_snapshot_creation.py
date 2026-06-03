@@ -8,6 +8,7 @@ from dateutil.parser import parse as date_parse
 
 from aqua_voting_tracker.utils.tests import fake
 from aqua_voting_tracker.voting.marketkeys.base import BaseMarketKeysProvider
+from aqua_voting_tracker.voting.models import VotingSnapshot
 from aqua_voting_tracker.voting.services.snapshot_creation import (
     SnapshotAssetRecord,
     SnapshotCreationUseCase,
@@ -126,7 +127,8 @@ class TestMarketKeysProvider(BaseMarketKeysProvider):
                 'upvote_account_id': md['upvote'],
                 'downvote_account_id': md['downvote'],
                 'voting_boost': md.get('voting_boost', 0),
-                'downvote_immunity': md.get('downvote_immunity', False)
+                'downvote_immunity': md.get('downvote_immunity', False),
+                'whitelisted_for_rewards': md.get('whitelisted_for_rewards', False),
             } for md in markets_data
         ]
         self.markets_data_by_upvote = {
@@ -219,6 +221,37 @@ class SnapshotCreationMarketsDataTestCase(TestCase):
         self.assertListEqual(snapshot, [
             self.snapshot_record1,
         ])
+
+    def test_prepare_markets_data_copies_whitelisted_for_rewards(self):
+        upvote = fake.stellar_public_key()
+        downvote = fake.stellar_public_key()
+
+        provider = TestMarketKeysProvider([{
+            'upvote': upvote,
+            'downvote': downvote,
+            'whitelisted_for_rewards': True,
+        }])
+        use_case = SnapshotCreationUseCase(provider)
+
+        snapshot = list(use_case.get_markets_data([upvote]))
+
+        self.assertEqual(len(snapshot), 1)
+        self.assertTrue(snapshot[0].whitelisted_for_rewards)
+
+    def test_prepare_markets_data_whitelisted_defaults_to_false(self):
+        upvote = fake.stellar_public_key()
+        downvote = fake.stellar_public_key()
+
+        provider = TestMarketKeysProvider([{
+            'upvote': upvote,
+            'downvote': downvote,
+        }])
+        use_case = SnapshotCreationUseCase(provider)
+
+        snapshot = list(use_case.get_markets_data([upvote]))
+
+        self.assertEqual(len(snapshot), 1)
+        self.assertFalse(snapshot[0].whitelisted_for_rewards)
 
 
 class SnapshotCreationVotesValueTestCase(TestCase):
@@ -473,3 +506,29 @@ class SnapshotCreationSetRankTestCase(TestCase):
         self.assertEqual(snapshot[2].market_key, snapshot_record1.market_key)
         self.assertEqual(snapshot[3].rank, 4)
         self.assertEqual(snapshot[3].market_key, snapshot_record3.market_key)
+
+
+class SnapshotCreationPersistenceTestCase(TestCase):
+    def setUp(self):
+        self.use_case = SnapshotCreationUseCase(BaseMarketKeysProvider())
+
+    def test_save_snapshot_persists_whitelisted_for_rewards(self):
+        timestamp = timezone.now()
+
+        whitelisted = SnapshotRecordFactory(
+            market_key=fake.stellar_public_key(),
+            rank=1,
+            whitelisted_for_rewards=True,
+        )
+        not_whitelisted = SnapshotRecordFactory(
+            market_key=fake.stellar_public_key(),
+            rank=2,
+            whitelisted_for_rewards=False,
+        )
+
+        self.use_case.save_snapshot([whitelisted, not_whitelisted], timestamp)
+
+        saved = VotingSnapshot.objects.filter(timestamp=timestamp).order_by('rank')
+        self.assertEqual(saved.count(), 2)
+        self.assertTrue(saved[0].whitelisted_for_rewards)
+        self.assertFalse(saved[1].whitelisted_for_rewards)
