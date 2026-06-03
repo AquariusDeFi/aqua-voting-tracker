@@ -103,6 +103,8 @@ class VotingSnapshot(models.Model):
 
     extra = models.JSONField()
 
+    whitelisted_for_rewards = models.BooleanField(default=False, db_index=True)
+
     objects = VotingSnapshotQuerySet.as_manager()
 
     def __str__(self):
