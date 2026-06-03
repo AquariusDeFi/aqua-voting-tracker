@@ -39,6 +39,8 @@ class SnapshotRecord:
     adjusted_votes_value: Decimal = 0
     rank: int = None
 
+    whitelisted_for_rewards: bool = False
+
     @property
     def boosted_value(self):
         return self.votes_value * (1 + self.voting_boost)
@@ -73,6 +75,7 @@ class SnapshotCreationUseCase:
                 downvote_account_id=market_key['downvote_account_id'],
                 voting_boost=Decimal(market_key.get('voting_boost', 0)),
                 downvote_immunity=market_key.get('downvote_immunity', False),
+                whitelisted_for_rewards=bool(market_key.get('whitelisted_for_rewards')),
             ) for market_key in self.market_key_provider.get_multiple(market_keys)
         )
 
@@ -146,6 +149,8 @@ class SnapshotCreationUseCase:
                 adjusted_votes_value=snapshot_record.adjusted_votes_value,
 
                 timestamp=timestamp,
+
+                whitelisted_for_rewards=snapshot_record.whitelisted_for_rewards,
 
                 extra={
                     'upvote_assets': [dataclasses.asdict(record) for record in snapshot_record.upvote_assets],

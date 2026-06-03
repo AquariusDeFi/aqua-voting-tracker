@@ -57,6 +57,18 @@ class TopVotedSnapshotView(ListModelMixin, BaseVotingSnapshotView):
         return self.list(request, *args, **kwargs)
 
 
+class WhitelistedSnapshotView(ListModelMixin, BaseVotingSnapshotView):
+    pagination_class = BaseVotingPagination
+
+    def get_queryset(self):
+        return super(WhitelistedSnapshotView, self).get_queryset().filter(
+            whitelisted_for_rewards=True,
+        ).order_by('-voting_amount')
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
 class VotingSnapshotStatsView(BaseVotingSnapshotView):
     def get(self, request, *args, **kwargs):
         stats = VotingSnapshot.objects.filter_last_snapshot().current_stats()
