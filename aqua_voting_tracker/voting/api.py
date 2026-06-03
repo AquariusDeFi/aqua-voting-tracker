@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from django.utils import timezone
+from django_filters.rest_framework import DjangoFilterBackend
 
 from rest_framework.exceptions import ParseError
 from rest_framework.generics import GenericAPIView
@@ -22,30 +23,17 @@ class BaseVotingSnapshotView(GenericAPIView):
     serializer_class = VotingSnapshotSerializer
     queryset = VotingSnapshot.objects.filter_last_snapshot().annotate_assets()
     permission_classes = (AllowAny, )
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-
-        whitelisted_param = self.request.query_params.get('whitelisted_for_rewards')
-        if whitelisted_param is None:
-            return qs
-
-        value = whitelisted_param.lower()
-        if value in ('true', '1'):
-            return qs.filter(whitelisted_for_rewards=True)
-        elif value in ('false', '0'):
-            return qs.filter(whitelisted_for_rewards=False)
-        else:
-            raise ParseError(f"Invalid value for 'whitelisted_for_rewards': {whitelisted_param}")
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['whitelisted_for_rewards']
 
 
 class MultiGetVotingSnapshotView(ListModelMixin, BaseVotingSnapshotView):
     pagination_class = FakePagination
-    filter_backends = [MultiGetFilterBackend]
+    filter_backends = [MultiGetFilterBackend, DjangoFilterBackend]
     multiget_filter_fields = ['market_key']
 
     def get_queryset(self):
-        queryset = super(MultiGetVotingSnapshotView, self).get_queryset()
+        queryset = super().get_queryset()
 
         if not any(filter_field in self.request.query_params for filter_field in self.multiget_filter_fields):
             return queryset.none()
