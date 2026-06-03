@@ -9,6 +9,7 @@ from aqua_voting_tracker.voting.models import VotingSnapshot, VotingSnapshotAsse
 AST = VotingSnapshotAsset.Direction
 TOP_VOTED_URL = '/api/voting-snapshot/top-voted/'
 TOP_VOLUME_URL = '/api/voting-snapshot/top-volume/'
+MULTIGET_URL = '/api/voting-snapshot/'
 
 
 class WhitelistedFilterTestCase(TestCase):
@@ -215,10 +216,40 @@ class WhitelistedFilterTestCase(TestCase):
 
     # ── invalid value ──────────────────────────────────────────────────────────
 
-    def test_invalid_whitelisted_value_returns_400(self):
-        """/api/voting-snapshot/top-voted/?whitelisted_for_rewards=maybe returns 400."""
+    def test_invalid_whitelisted_value_ignored_by_django_filter(self):
+        """DjangoFilterBackend silently ignores non-boolean values and returns 200 with
+        all results (the filter is simply not applied). This is a deliberate API
+        behavior change from the previous manual parser which returned 400."""
         timestamp = timezone.now()
         self._make_snapshot('a', 10, timestamp, whitelisted_for_rewards=True)
+        self._make_snapshot('b', 20, timestamp, whitelisted_for_rewards=False)
 
         response = self.client.get(TOP_VOTED_URL + '?whitelisted_for_rewards=maybe')
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        # Filter is ignored — all latest-snapshot rows are returned.
+        self.assertEqual(data['count'], 2)
+
+    # ── multiget + whitelisted_for_rewards ─────────────────────────────────────
+
+    def test_multiget_with_whitelisted_filter(self):
+        """Combined multiget and whitelist filter: only whitelisted items for the
+        requested market keys are returned."""
+        timestamp = timezone.now()
+
+        mk_whitelisted = 'GBWHITELISTEDKEYXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+        mk_not_whitelisted = 'GBNOTWHITELISTEDKEYXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+
+        self._make_snapshot(mk_whitelisted, 10, timestamp, whitelisted_for_rewards=True)
+        self._make_snapshot(mk_not_whitelisted, 20, timestamp, whitelisted_for_rewards=False)
+
+        response = self.client.get(
+            f'{MULTIGET_URL}?market_key={mk_whitelisted}&market_key={mk_not_whitelisted}'
+            f'&whitelisted_for_rewards=true',
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(data['results'][0]['market_key'], mk_whitelisted)
+        self.assertTrue(data['results'][0]['whitelisted_for_rewards'])
