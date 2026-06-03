@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from django.core.cache import cache
 from django.utils import timezone
 
 from rest_framework.exceptions import ParseError
@@ -9,6 +10,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from aqua_voting_tracker.utils.drf.filters import MultiGetFilterBackend
+from aqua_voting_tracker.voting.marketkeys.requests import ApiMarketKeysProvider
 from aqua_voting_tracker.voting.models import Vote, VotingSnapshot
 from aqua_voting_tracker.voting.pagination import BaseVotingPagination, FakePagination
 from aqua_voting_tracker.voting.serializers import (
@@ -22,6 +24,28 @@ class BaseVotingSnapshotView(GenericAPIView):
     serializer_class = VotingSnapshotSerializer
     queryset = VotingSnapshot.objects.filter_last_snapshot().annotate_assets()
     permission_classes = (AllowAny, )
+
+
+WHITELISTED_MARKET_KEYS_CACHE_KEY = 'aqua_voting_tracker.voting.WHITELISTED_MARKET_KEYS'
+WHITELISTED_MARKET_KEYS_CACHE_TIMEOUT = 5 * 60
+
+
+def get_whitelisted_market_keys():
+    whitelisted_market_keys = cache.get(WHITELISTED_MARKET_KEYS_CACHE_KEY)
+    if whitelisted_market_keys is not None:
+        return whitelisted_market_keys
+
+    whitelisted_market_keys = [
+        market_key['account_id']
+        for market_key in ApiMarketKeysProvider()
+        if market_key.get('whitelisted_for_rewards')
+    ]
+    cache.set(
+        WHITELISTED_MARKET_KEYS_CACHE_KEY,
+        whitelisted_market_keys,
+        WHITELISTED_MARKET_KEYS_CACHE_TIMEOUT,
+    )
+    return whitelisted_market_keys
 
 
 class MultiGetVotingSnapshotView(ListModelMixin, BaseVotingSnapshotView):
@@ -52,6 +76,18 @@ class TopVolumeSnapshotView(ListModelMixin, BaseVotingSnapshotView):
 class TopVotedSnapshotView(ListModelMixin, BaseVotingSnapshotView):
     queryset = BaseVotingSnapshotView.queryset.order_by('-voting_amount')
     pagination_class = BaseVotingPagination
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class WhitelistedSnapshotView(ListModelMixin, BaseVotingSnapshotView):
+    pagination_class = BaseVotingPagination
+
+    def get_queryset(self):
+        return super(WhitelistedSnapshotView, self).get_queryset().filter(
+            market_key__in=get_whitelisted_market_keys(),
+        ).order_by('-voting_amount')
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
