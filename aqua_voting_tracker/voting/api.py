@@ -23,6 +23,21 @@ class BaseVotingSnapshotView(GenericAPIView):
     queryset = VotingSnapshot.objects.filter_last_snapshot().annotate_assets()
     permission_classes = (AllowAny, )
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+
+        whitelisted_param = self.request.query_params.get('whitelisted_for_rewards')
+        if whitelisted_param is None:
+            return qs
+
+        value = whitelisted_param.lower()
+        if value in ('true', '1'):
+            return qs.filter(whitelisted_for_rewards=True)
+        elif value in ('false', '0'):
+            return qs.filter(whitelisted_for_rewards=False)
+        else:
+            raise ParseError(f"Invalid value for 'whitelisted_for_rewards': {whitelisted_param}")
+
 
 class MultiGetVotingSnapshotView(ListModelMixin, BaseVotingSnapshotView):
     pagination_class = FakePagination
@@ -52,18 +67,6 @@ class TopVolumeSnapshotView(ListModelMixin, BaseVotingSnapshotView):
 class TopVotedSnapshotView(ListModelMixin, BaseVotingSnapshotView):
     queryset = BaseVotingSnapshotView.queryset.order_by('-voting_amount')
     pagination_class = BaseVotingPagination
-
-    def get(self, request, *args, **kwargs):
-        return self.list(request, *args, **kwargs)
-
-
-class WhitelistedSnapshotView(ListModelMixin, BaseVotingSnapshotView):
-    pagination_class = BaseVotingPagination
-
-    def get_queryset(self):
-        return super(WhitelistedSnapshotView, self).get_queryset().filter(
-            whitelisted_for_rewards=True,
-        ).order_by('-voting_amount')
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
