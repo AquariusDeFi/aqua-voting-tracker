@@ -31,35 +31,16 @@ class ApiMarketKeysProvider(BaseMarketKeysProvider):
             yield from records
 
     def get_multiple(self, account_ids: Iterable[str]) -> Iterator[dict]:
+        # Resolve markets by their (upvote) account_id only. The downvote second-pass that
+        # resolved votes paid into downvote wallets is removed — downvotes no longer count —
+        # and we no longer skip markets that lack a downvote wallet (so those are still ranked).
         api_endpoint = self.get_api_endpoint()
-        not_found_ids = []
-        downvotes_account_ids = set()
 
         for chunk in chunked(account_ids, self.chunk_size):
             chunk = list(chunk)
 
             response = requests.get(api_endpoint, params=[
                 ('account_id', account_id) for account_id in chunk
-            ])
-            response.raise_for_status()
-
-            for market_key in response.json()['results']:
-                chunk.remove(market_key['account_id'])
-
-                if not market_key['downvote_account_id']:
-                    continue
-                else:
-                    downvotes_account_ids.add(market_key['downvote_account_id'])
-
-                yield market_key
-
-            not_found_ids.extend(chunk)
-
-        not_found_ids = [account_id for account_id in not_found_ids if account_id not in downvotes_account_ids]
-
-        for chunk in chunked(not_found_ids, self.chunk_size):
-            response = requests.get(api_endpoint, params=[
-                ('downvote_account_id', account_id) for account_id in chunk
             ])
             response.raise_for_status()
 
