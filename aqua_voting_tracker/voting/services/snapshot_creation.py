@@ -106,8 +106,9 @@ class SnapshotCreationUseCase:
 
             if not snapshot_record.downvote_immunity:
                 for stat in downvote_stats:
+                    # Downvotes are no longer subtracted — markets are ranked on GROSS upvotes.
+                    # downvote_value / downvote_assets are still recorded for history (columns kept).
                     snapshot_record.downvote_value += stat['votes_value']
-                    snapshot_record.votes_value -= stat['votes_value']
                     snapshot_record.voting_amount += stat['voting_amount']
                     snapshot_record.downvote_assets.append(SnapshotAssetRecord(
                         asset=stat['asset'],
