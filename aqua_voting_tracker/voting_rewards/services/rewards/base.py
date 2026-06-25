@@ -35,6 +35,10 @@ class RewardsCalculator:
     def get_reward_zone(self) -> Iterable[MarketReward]:
         current_stats = get_voting_stats()
         total_voting_value = Decimal(current_stats['adjusted_votes_value_sum'])
+        # Stash the full voting denominator so calculate_shares scores each market
+        # against ALL votes (not the survivor sum). Set before the first yield, so
+        # it is populated by the time calculate_shares runs downstream.
+        self.total_voting_value = total_voting_value
 
         reward_candidates = get_voting_rewards_candidate(self.MIN_SHARE_FOR_REWARD_ZONE)
         for candidate in reward_candidates:
@@ -64,31 +68,30 @@ class RewardsCalculator:
             yield market_reward
 
     def filter_eligible(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
-        # Drop markets whose pair is not whitelisted for rewards. Runs before
-        # calculate_shares so the share denominator is restricted to survivors —
-        # when there are few enough survivors, each naturally lifts to the
-        # REWARD_MAX_SHARE cap via cap+redistribute.
+        # Drop markets whose pair is not whitelisted for rewards. Their votes still
+        # count toward the full denominator (self.total_voting_value), so removing
+        # them does NOT lift the survivors' shares — a dropped market's share is
+        # simply not emitted.
         for market_reward in reward_zone:
             if not market_reward.whitelisted_for_rewards:
                 continue
             yield market_reward
 
     def calculate_shares(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
-        reward_zone = list(reward_zone)
-        reward_zone_votes_value = sum(market.votes_value for market in reward_zone)
-
-        cut_share = 0
-        remain_share = 1
+        # Cap-only, no redistribution (decision 2026-06-01, Глеб + Roman).
+        # Each market's share is its vote fraction of the FULL voting denominator
+        # (self.total_voting_value, including non-eligible / non-whitelisted votes),
+        # clamped at REWARD_MAX_SHARE. The capped excess is NOT spread across other
+        # markets, and the denominator is NOT renormalized to survivors. So a market
+        # with 43% of the votes earns exactly the 10% cap and the other 33pp are
+        # simply not emitted — small pairs keep their raw share (e.g. 0.5% -> 35k),
+        # they are not lifted toward the cap. Total dispersion falls below
+        # TOTAL_REWARDS by the capped excess plus the non-eligible vote share; this
+        # sub-7M payout is intended for the whitelist transition period.
         for market_reward in reward_zone:
-
-            share = market_reward.votes_value / reward_zone_votes_value
-            add_share = cut_share * share / remain_share
-            remain_share -= share
-            cut_share -= add_share
-            share += add_share
+            share = market_reward.votes_value / self.total_voting_value
 
             if share > self.REWARD_MAX_SHARE:
-                cut_share += share - self.REWARD_MAX_SHARE
                 share = self.REWARD_MAX_SHARE
 
             market_reward.share = share
@@ -96,10 +99,10 @@ class RewardsCalculator:
             yield market_reward
 
     def set_reward_value(self, reward_zone: Iterable[MarketReward]) -> Iterable[MarketReward]:
-        # No /total_share renormalization: per-pair cap stays absolute at
-        # REWARD_MAX_SHARE * TOTAL_REWARDS, and total dispersion falls below
-        # TOTAL_REWARDS whenever cap+redistribute leaves any residue (e.g. with
-        # few enough survivors that everyone hits the cap).
+        # No /total_share renormalization: per-pair reward stays absolute at
+        # share * TOTAL_REWARDS (cap = REWARD_MAX_SHARE * TOTAL_REWARDS = 700k),
+        # and the dispersed total is below TOTAL_REWARDS by the capped excess plus
+        # the non-eligible vote share.
         for market_reward in reward_zone:
             market_reward.reward_value = round(self.TOTAL_REWARDS * market_reward.share)
             market_reward.share = Decimal(round(market_reward.share, 4))
