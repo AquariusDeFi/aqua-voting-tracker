@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "bfcbfcd6978eb18ebbb10939ecc337fb7c2c9e53b6d44a240512e627279c376d"
+            "sha256": "5d6ed69b6b011004da4f76970764754e9b94a6203bb526e620332ebb604a46bf"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -1286,12 +1286,8 @@
             "extras": [
                 "aiohttp"
             ],
-            "hashes": [
-                "sha256:2fe3f4fee07518d53aad38cb093f5f4159b6aefa35998031e9c601bfa93e4339",
-                "sha256:45545ee0e696cda88047f1cb5ff3ff7cf02c36a7544ea6eb91e83b4b4cc20742"
-            ],
-            "markers": "python_version >= '3.9' and python_version < '4.0'",
-            "version": "==13.0.0"
+            "git": "https://github.com/StellarCN/py-stellar-base.git",
+            "ref": "66c7f30423ff2be9e7b7226a10f41e918973bb58"
         },
         "traitlets": {
             "hashes": [
