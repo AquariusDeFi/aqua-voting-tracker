@@ -43,7 +43,7 @@ django-redis = "*"
 more-itertools = "*"
 prometheus-client = "*"
 scipy = "*"
-stellar-sdk = {extras = ["aiohttp"], version = "*"}
+stellar-sdk = {extras = ["aiohttp"], version = "==17.0.0"}
 django-filter = "*"
 
 [requires]
