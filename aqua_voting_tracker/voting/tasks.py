@@ -11,6 +11,7 @@ from django.utils import timezone
 from asgiref.sync import sync_to_async
 from dateutil.parser import parse as date_parse
 from stellar_sdk import AiohttpClient, Server, ServerAsync
+from stellar_sdk.exceptions import NotFoundError
 
 from aqua_voting_tracker.taskapp import app as celery_app
 from aqua_voting_tracker.utils.stellar.requests import load_all_records
@@ -76,9 +77,18 @@ def task_load_new_claimable_balances():
 
 
 async def _update_claim_back_time(vote: Vote, *, server: ServerAsync, semaphore: Semaphore):
-    async with semaphore:
-        response = await server.operations().for_claimable_balance(vote.balance_id).order(desc=True).limit(1).call()
-    operation = response['_embedded']['records'][0]
+    # Horizon answers 404 or an empty page when the balance has no operation in its retained history,
+    # so it has not been claimed back yet.
+    try:
+        async with semaphore:
+            response = await server.operations().for_claimable_balance(vote.balance_id).order(desc=True).limit(1).call()
+    except NotFoundError:
+        return
+
+    records = response['_embedded']['records']
+    if not records:
+        return
+    operation = records[0]
 
     if operation['type'] not in ['claim_claimable_balance', 'clawback_claimable_balance']:
         return
