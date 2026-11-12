@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "bfcbfcd6978eb18ebbb10939ecc337fb7c2c9e53b6d44a240512e627279c376d"
+            "sha256": "a7cc61a3524a954dd9cf94ea1774697ecc45bfe569f1a87dfb639cf53c4e962a"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -1287,11 +1287,12 @@
                 "aiohttp"
             ],
             "hashes": [
-                "sha256:2fe3f4fee07518d53aad38cb093f5f4159b6aefa35998031e9c601bfa93e4339",
-                "sha256:45545ee0e696cda88047f1cb5ff3ff7cf02c36a7544ea6eb91e83b4b4cc20742"
+                "sha256:26066e64cd18aeea72cd7fd1ade73658066825e4d823dc652463a783ee394013",
+                "sha256:4d40daa8a6b88e1d6dcb7f4ed0df389a5e704a8e18ca9e0da6a800ed9a159240"
             ],
-            "markers": "python_version >= '3.9' and python_version < '4.0'",
-            "version": "==13.0.0"
+            "index": "pypi",
+            "markers": "python_version >= '3.10' and python_version < '4.0'",
+            "version": "==17.0.0"
         },
         "traitlets": {
             "hashes": [
