@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from aqua_voting_tracker.voting.models import VotingSnapshot
@@ -41,3 +43,14 @@ class VotingSnapshotStatsSerializer(serializers.Serializer):
 class VotingAccountStatsSerializer(serializers.Serializer):
     voting_account = serializers.CharField()
     votes_value = serializers.DecimalField(max_digits=20, decimal_places=7)
+
+
+class VotingAccountAssetStatsSerializer(VotingAccountStatsSerializer):
+    asset_votes = serializers.SerializerMethodField()
+
+    def get_asset_votes(self, obj):
+        amounts = {}
+        for component in obj['asset_components']:
+            asset = component['asset']
+            amounts[asset] = amounts.get(asset, Decimal(0)) + Decimal(component['votes_value'])
+        return [{'asset': asset, 'votes_value': format(amounts[asset], '.7f')} for asset in sorted(amounts)]

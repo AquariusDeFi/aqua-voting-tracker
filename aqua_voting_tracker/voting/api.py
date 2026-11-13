@@ -1,18 +1,26 @@
+import hashlib
+import json
 from datetime import datetime
 
+from django.conf import settings
+from django.contrib.postgres.aggregates import JSONBAgg
+from django.db.models import CharField
+from django.db.models.functions import Cast, JSONObject
 from django.utils import timezone
-from django_filters.rest_framework import DjangoFilterBackend
 
-from rest_framework.exceptions import ParseError
+from rest_framework.exceptions import APIException, ParseError
 from rest_framework.generics import GenericAPIView
 from rest_framework.mixins import ListModelMixin
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from django_filters.rest_framework import DjangoFilterBackend
+
 from aqua_voting_tracker.utils.drf.filters import MultiGetFilterBackend
 from aqua_voting_tracker.voting.models import Vote, VotingSnapshot
 from aqua_voting_tracker.voting.pagination import BaseVotingPagination, FakePagination
 from aqua_voting_tracker.voting.serializers import (
+    VotingAccountAssetStatsSerializer,
     VotingAccountStatsSerializer,
     VotingSnapshotSerializer,
     VotingSnapshotStatsSerializer,
@@ -76,6 +84,11 @@ class VotingAccountStatsView(ListModelMixin, GenericAPIView):
 
     timestamp_param = 'timestamp'
 
+    def get_serializer_class(self):
+        if self.request.query_params.get('include_assets') == '1':
+            return VotingAccountAssetStatsSerializer
+        return super().get_serializer_class()
+
     def get_queryset(self):
         timestamp = self.request.query_params.get(self.timestamp_param)
         try:
@@ -83,13 +96,20 @@ class VotingAccountStatsView(ListModelMixin, GenericAPIView):
         except (ValueError, OverflowError):
             raise ParseError()
 
-        return Vote.objects.filter(
+        votes = Vote.objects.filter(
             market_key=self.kwargs.get('market_key', ''),
         ).filter_exist_at(
             timestamp,
-        # ).filter_by_min_term(
-        #     settings.VOTING_MIN_TERM,
+            # ).filter_by_min_term(
+            #     settings.VOTING_MIN_TERM,
         ).annotate_by_voting_account().order_by('voting_account')
+        if self.request.query_params.get('include_assets') == '1':
+            # Components and total are aggregates in the same SELECT. Casting
+            # decimal amounts to text avoids a JSON floating-point conversion.
+            votes = votes.annotate(asset_components=JSONBAgg(JSONObject(
+                asset='asset', votes_value=Cast('amount', CharField()),
+            )))
+        return votes
 
     def injection_timestamp(self):
         """
@@ -111,4 +131,19 @@ class VotingAccountStatsView(ListModelMixin, GenericAPIView):
 
     def get(self, request, *args, **kwargs):
         self.injection_timestamp()
-        return self.list(request, *args, **kwargs)
+        if request.query_params.get('include_assets') != '1':
+            return self.list(request, *args, **kwargs)
+        # The optional service view is bounded. Its fingerprint covers the whole
+        # market, so delayed ingestion between pages cannot silently change the
+        # denominator. All weights/components are read by one aggregate SELECT.
+        rows = list(self.get_queryset()[:10001])
+        if len(rows) > 10000:
+            raise APIException('The component view exceeds 10000 voting accounts.')
+        data = self.get_serializer(rows, many=True).data
+        network_id = hashlib.sha256(settings.STELLAR_PASSPHRASE.encode()).hexdigest()
+        contents = {'as_of': int(request.query_params[self.timestamp_param]), 'network_id': network_id,
+                    'market_key': self.kwargs['market_key'], 'results': data}
+        view_id = hashlib.sha256(json.dumps(contents, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        response = self.get_paginated_response(self.paginate_queryset(data))
+        response.data.update(as_of=contents['as_of'], network_id=network_id, view_id=view_id)
+        return response
